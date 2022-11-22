@@ -93,7 +93,7 @@ jobs:
     - name: Modify configuration
       run: |
         cd src && make defconfig
-        sed -i '/CONFIG_DEFAULT/'d .config
+        sed -i '/CONFIG_DEFAULT_luci/'d .config
         cat .config
     
     - name: Copy Current Config
