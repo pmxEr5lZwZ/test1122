@@ -1,0 +1,79 @@
+name: Build luci-app-xray
+
+on:
+  repository_dispatch:
+  workflow_dispatch:
+    inputs:
+      ssh:
+        description: 'SSH connection to Actions'
+        required: false
+        default: 'true'
+        
+env:
+  # 这里填入你的SDK的地址，在https://downloads.openwrt.org/releases/中找到你的OpenWRT版本的SDK
+  SDK_URL: https://downloads.openwrt.org/releases/22.03.2/targets/x86/64/openwrt-sdk-22.03.2-x86-64_gcc-11.2.0_musl.Linux-x86_64.tar.xz
+  # 这里填入你的设备的配置文件
+  CONFIG_FILE: x86_64.config
+
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@main
+      
+    - name: Initialization environment
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        sudo -E apt -qq update
+        sudo -E apt -qq install $(curl -fsSL git.io/depends-ubuntu-2004)
+        sudo mkdir -p /workdir
+        sudo chown $USER:$GROUPS /workdir
+        
+    - name: Download SDK
+      working-directory: /workdir
+      run: |
+        wget $SDK_URL -O sdk.tar.xz
+        mkdir sdk
+        tar -xf sdk.tar.xz -C sdk --strip-components 1
+        ln -sf /workdir/sdk $GITHUB_WORKSPACE/sdk
+        
+    - name: Clone luci-app-xray
+      working-directory: /workdir/sdk
+      run: |
+        git clone https://github.com/yichya/luci-app-xray.git package/luci-app-xray
+        
+    - name: Update feeds
+      run: cd sdk && ./scripts/feeds update -a
+
+    - name: Install feeds
+      run: cd sdk && ./scripts/feeds install -a
+      
+    - name: Load custom configuration
+      run: |
+        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE sdk/.config
+        
+    - name: SSH connection to Actions
+      uses: P3TERX/ssh2actions@v1.0.0
+      if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh  != 'false') || contains(github.event.action, 'ssh')
+      
+    - name: Compile the luci-app-xray
+      id: compile
+      run: |
+        cd sdk
+        echo -e "$(nproc) thread compile"
+        make package/luci-app-xray/compile -j$(nproc) || make package/luci-app-xray/compile -j1 || make package/luci-app-xray/compile -j1 V=s
+    - name: Upload bin directory
+      uses: actions/upload-artifact@main
+      with:
+        name: luci-app-xray
+        path: sdk/bin
+        
+    - name: Upload bin to release
+      uses: softprops/action-gh-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        files: sdk/bin/*
