@@ -76,7 +76,6 @@ jobs:
       
     - name: Load custom configuration
       run: |
-        [ -e files ] && mv files src/files
         [ -e $CONFIG_FILE ] && mv $CONFIG_FILE src/.config
         cat $EXTERNAL_FILE >> src/.config
         [ $IF_ADD_PACKAGE = true ] && cat $PACKAGE_FILE >> src/.config
@@ -87,7 +86,32 @@ jobs:
     - name: SSH connection to Actions
       uses: P3TERX/ssh2actions@v1.0.0
       if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh  != 'false') || contains(github.event.action, 'ssh')
+
+    - name: Modify configuration
+      run: |
+        cd src && make defconfig
+        cat .config
+    
+    - name: Copy Current Config
+      run: |
+        cd src
+        mkdir current-config
+        cp .config current-config/.config
       
+    - name: Upload Current Config
+      uses: actions/upload-artifact@main
+      with:
+        name: current-config
+        path: src/current-config
+      
+    - name: Download dl library
+      run: |
+        cd src
+        echo -e "$(nproc) thread compile"
+        make download -j$(nproc) || make download -j1
+        find dl -size -1024c -exec ls -l {} \;
+        find dl -size -1024c -exec rm -f {} \;
+
     - name: Compile The Package
       id: compile
       run: |
