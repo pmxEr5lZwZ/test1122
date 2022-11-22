@@ -7,13 +7,25 @@ on:
       ssh:
         description: 'SSH connection to Actions'
         required: false
-        default: 'true'
+        default: 'false'
         
 env:
   # 这里填入你的SDK的地址，在https://downloads.openwrt.org/releases/中找到你的OpenWRT版本的SDK
   SDK_URL: https://downloads.openwrt.org/releases/22.03.2/targets/x86/64/openwrt-sdk-22.03.2-x86-64_gcc-11.2.0_musl.Linux-x86_64.tar.xz
   # 这里填入你的设备的配置文件
-  CONFIG_FILE: x86_64.config
+  CONFIG_FILE: device/x86-64.config
+  # 这里填入要编译包的信息
+  PACKAGE_REPO: https://github.com/yichya/luci-app-xray.git
+  PACKAGE_NAME: luci-app-xray
+  PACKAGE_BRANCH: master
+  # 下方参数保持默认即可
+  SHELL_1: script/before-update-feeds.sh
+  SHELL_2: script/after-install-feeds.sh
+  TZ: Asia/Shanghai
+  FEEDS_CONF: config/feeds.conf.default
+  EXTERNAL_FILE: config/external.config
+  IF_ADD_PACKAGE: false
+  PACKAGE_FILE: config/package.config
 
 jobs:
   build:
@@ -28,52 +40,70 @@ jobs:
         DEBIAN_FRONTEND: noninteractive
       run: |
         sudo -E apt -qq update
+        sudo -E apt -qq full-upgrade -y
         sudo -E apt -qq install $(curl -fsSL git.io/depends-ubuntu-2004)
+        sudo -E apt -qq autoremove --purge
+        sudo -E apt -qq clean
+        sudo timedatectl set-timezone "$TZ"
         sudo mkdir -p /workdir
         sudo chown $USER:$GROUPS /workdir
         
-    - name: Download SDK
+    - name: Download OpenWRT SDK
       working-directory: /workdir
       run: |
         wget $SDK_URL -O sdk.tar.xz
-        mkdir sdk
-        tar -xf sdk.tar.xz -C sdk --strip-components 1
-        ln -sf /workdir/sdk $GITHUB_WORKSPACE/sdk
+        mkdir src
+        tar -xf sdk.tar.xz -C src --strip-components 1
+        ln -sf /workdir/src $GITHUB_WORKSPACE/src
         
-    - name: Clone luci-app-xray
-      working-directory: /workdir/sdk
+    - name: Clone Package Code
+      working-directory: /workdir/src
       run: |
-        git clone https://github.com/yichya/luci-app-xray.git package/luci-app-xray
+        git clone -b $PACKAGE_BRANCH $PACKAGE_REPO package/$PACKAGE_NAME
+        
+    - name: Load Custom Feeds
+      run: |
+        [ -e $FEEDS_CONF ] && mv $FEEDS_CONF src/feeds.conf.default
+        chmod +x $SHELL_1
+        cd src
+        $GITHUB_WORKSPACE/$SHELL_1
         
     - name: Update feeds
-      run: cd sdk && ./scripts/feeds update -a
+      run: cd src && ./scripts/feeds update -a
 
     - name: Install feeds
-      run: cd sdk && ./scripts/feeds install -a
+      run: cd src && ./scripts/feeds install -a
       
     - name: Load custom configuration
       run: |
-        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE sdk/.config
+        [ -e files ] && mv files src/files
+        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE src/.config
+        cat $EXTERNAL_FILE >> src/.config
+        [ $IF_ADD_PACKAGE = true ] && cat $PACKAGE_FILE >> src/.config
+        chmod +x $SHELL_2
+        cd src
+        $GITHUB_WORKSPACE/$SHELL_2
         
     - name: SSH connection to Actions
       uses: P3TERX/ssh2actions@v1.0.0
       if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh  != 'false') || contains(github.event.action, 'ssh')
       
-    - name: Compile the luci-app-xray
+    - name: Compile The Package
       id: compile
       run: |
-        cd sdk
+        cd src
         echo -e "$(nproc) thread compile"
-        make package/luci-app-xray/compile -j$(nproc) || make package/luci-app-xray/compile -j1 || make package/luci-app-xray/compile -j1 V=s
-    - name: Upload bin directory
+        make package/$PACKAGE_NAME/compile -j$(nproc) || make package/$PACKAGE_NAME/compile -j1 || make package/$PACKAGE_NAME/compile -j1 V=s
+
+    - name: Set ENV Name
+      run: |
+        cd src
+        grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
+        [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
+        echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+
+    - name: Upload Bin Directory
       uses: actions/upload-artifact@main
       with:
-        name: luci-app-xray
-        path: sdk/bin
-        
-    - name: Upload bin to release
-      uses: softprops/action-gh-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        files: sdk/bin/*
+        name: ${{ env.PACKAGE_NAME }}-${{ env.DEVICE_NAME }}-${{ env.FILE_DATE }}
+        path: src/bin
