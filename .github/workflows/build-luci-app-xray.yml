@@ -18,6 +18,8 @@ env:
   PACKAGE_REPO: https://github.com/yichya/luci-app-xray.git
   PACKAGE_NAME: luci-app-xray
   PACKAGE_BRANCH: master
+  # 下方参数保持默认即可
+  TZ: Asia/Shanghai
 
 jobs:
   build:
