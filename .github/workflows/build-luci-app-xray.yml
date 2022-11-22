@@ -19,7 +19,9 @@ env:
   PACKAGE_NAME: luci-app-xray
   PACKAGE_BRANCH: master
   # 下方参数保持默认即可
+  IF_RUN_SHELL_1: false
   SHELL_1: script/before-update-feeds.sh
+  IF_RUN_SHELL_2: false
   SHELL_2: script/after-install-feeds.sh
   TZ: Asia/Shanghai
   FEEDS_CONF: config/feeds.conf.default
@@ -34,17 +36,7 @@ jobs:
     steps:
     - name: Checkout
       uses: actions/checkout@main
-      
-    - name: Load custom configuration
-      run: |
-        [ -e files ] && mv files src/files
-        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE src/.config
-        cat $EXTERNAL_FILE >> src/.config
-        [ $IF_ADD_PACKAGE = true ] && cat $PACKAGE_FILE >> src/.config
-        chmod +x $SHELL_2
-        cd src
-        $GITHUB_WORKSPACE/$SHELL_2
-      
+
     - name: Initialization environment
       env:
         DEBIAN_FRONTEND: noninteractive
@@ -76,7 +68,7 @@ jobs:
         [ -e $FEEDS_CONF ] && mv $FEEDS_CONF src/feeds.conf.default
         chmod +x $SHELL_1
         cd src
-        $GITHUB_WORKSPACE/$SHELL_1
+        [ $IF_RUN_SHELL_1 = true ] && $GITHUB_WORKSPACE/$SHELL_1
         
     - name: Update feeds
       run: cd src && ./scripts/feeds update -a
@@ -92,7 +84,7 @@ jobs:
         [ $IF_ADD_PACKAGE = true ] && cat $PACKAGE_FILE >> src/.config
         chmod +x $SHELL_2
         cd src
-        $GITHUB_WORKSPACE/$SHELL_2
+        [ $IF_RUN_SHELL_2 = true ] && $GITHUB_WORKSPACE/$SHELL_2
         
     - name: SSH connection to Actions
       uses: P3TERX/ssh2actions@v1.0.0
